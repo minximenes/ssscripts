@@ -17,7 +17,7 @@ create_service () {
         if [ $? -eq 0 ]; then
             echo "Finish installing shadowsocks-libev"
             # stop default service
-            sudo systemctl stop shadowsocks-libev
+            sudo systemctl disable shadowsocks-libev --now
         fi
     fi
     # call bash to write conf temp file
