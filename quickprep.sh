@@ -59,7 +59,7 @@ show_status() {
         # get port according with json file name
         ports=`ls /etc/shadowsocks-libev/ | grep "^[0-9]" | rev | cut -d "." -f2- | rev`
         if [ `expr length "${ports[@]}"` -eq 0 ]; then
-            echo "No service is using"
+            echo "No service is in use"
         fi
     fi
 
