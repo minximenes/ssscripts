@@ -16,10 +16,12 @@ create_service () {
         sudo apt-get install -y shadowsocks-libev=3.3.5+ds-10build3
         if [ $? -eq 0 ]; then
             echo "Finish installing shadowsocks-libev"
+            # stop default service
+            sudo systemctl stop shadowsocks-libev
         fi
     fi
     # call bash to write conf temp file
-    bash ./write_conf.sh $PORT $PWD
+    bash `dirname "$0"`/write_conf.sh $PORT $PWD
     sudo mv ./$PORT.tmp /etc/shadowsocks-libev/$PORT.json
     # start service
     sudo systemctl enable shadowsocks-libev-server@$PORT.service
@@ -56,6 +58,9 @@ show_status() {
     else
         # get port according with json file name
         ports=`ls /etc/shadowsocks-libev/ | grep "^[0-9]" | rev | cut -d "." -f2- | rev`
+        if [ `expr length "${ports[@]}"` -eq 0 ]; then
+            echo "No service is using"
+        fi
     fi
 
     for port in $ports
@@ -81,5 +86,6 @@ case "$COMD" in
         show_status $@
         ;;
     *)
+        echo "Plese input start|restart|stop|status"
         ;;
 esac
