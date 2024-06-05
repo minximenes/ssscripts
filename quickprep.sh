@@ -82,9 +82,9 @@ create_service () {
 
     # set expire period
     if [ -n "$EXPIRE" ]; then
-        schedule_stop $PORT "$EXPIRE"
+        create_schedule $PORT "$EXPIRE"
     else
-        echo "ATTENTION: Port $port's expiration time is not setted"
+        echo "ATTENTION: Port $PORT's expiration time is not setted"
     fi
     exit 0
 }
