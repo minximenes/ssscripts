@@ -46,9 +46,9 @@ create_data_limt() {
 
     # install pkg
     if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
-        sudo apt-get update
+        sudo apt-get update >/dev/null
         # non interactive
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent >/dev/null
         if [ $? -eq 0 ]; then
             echo "Finish installing iptables-persistent"
             # init chain
@@ -68,15 +68,16 @@ create_data_limt() {
     sudo service netfilter-persistent save >/dev/null
 
     # create update schedule
-    crontab -l > cron.limit.tmp
+    crontab -l  2>/dev/null > cron.limit.tmp
     # delete before insert
     sed -i '/quickprep.sh updatelimit '$PORT'/d' cron.limit.tmp
-    # update every hour
-    echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash `dirname "$0"`/quickprep.sh updatelimit $PORT $maxbytes/$maxbytes M">> cron.limit.tmp
+    # update every hours
+    memo="0/"$maxbytes"M/"$DATA
+    echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash `dirname "$0"`/quickprep.sh updatelimit $PORT $memo">> cron.limit.tmp
     crontab cron.limit.tmp
     rm -f cron.limit.tmp
 
-    echo "Port $PORT's data limit: $num$unit"
+    echo "Port $PORT's data limit: $DATA"
 }
 
 # drop data limit by port
@@ -84,7 +85,7 @@ create_data_limt() {
 drop_data_limit() {
     PORT=$1
 
-    if crontab -l | grep "quickprep.sh updatelimit $PORT" >/dev/null 2>&1; then
+    if crontab -l 2>/dev/null | grep "quickprep.sh updatelimit $PORT" >/dev/null; then
         # delete port rules
         del_rules $PORT
         sudo service netfilter-persistent save >/dev/null
@@ -94,7 +95,7 @@ drop_data_limit() {
         crontab cron.updatelimit.tmp
         rm -f cron.updatelimit.tmp
 
-        echo "Data limit of Port $PORT is also dropped"
+        echo "Data limit of Port $PORT is dropped"
     fi
 }
 
@@ -114,16 +115,18 @@ create_stop_schedule() {
     # endtime cannot be over one year
     begintime=$(date '+%Y-%m-%d %H:%M:%S')
     endtime=$(date -d "$begintime $num $unit" '+%Y-%m-%d %H:%M:%S')
+
     max=$(date -d "$begintime 12 month" '+%Y-%m-%d %H:%M:%S')
     if [ "$endtime" \> "$max" ]; then
         echo "Period is over one year. Please input period less than that"
         exit 1
     fi
     # insert scheduled task
-    crontab -l > cron.stop.tmp
+    crontab -l  2>/dev/null > cron.stop.tmp
     # delete before insert
     sed -i '/quickprep.sh stop '$PORT'/d' cron.stop.tmp
-    echo $(date -d "$endtime" '+%M %H %d %m') "*" "bash `dirname "$0"`/quickprep.sh stop $PORT" >> cron.stop.tmp
+    memo=$(date -d "$begintime" '+%Y-%m-%dT%H:%M:%S')"/"$PERIOD
+    echo $(date -d "$endtime" '+%M %H %d %m') "*" "bash `dirname "$0"`/quickprep.sh stop $PORT $memo" >> cron.stop.tmp
     crontab cron.stop.tmp
     rm -f cron.stop.tmp
 
@@ -135,13 +138,13 @@ create_stop_schedule() {
 drop_stop_schedule() {
     PORT=$1
 
-    if crontab -l | grep "quickprep.sh stop $PORT" >/dev/null 2>&1; then
+    if crontab -l 2>/dev/null | grep "quickprep.sh stop $PORT" >/dev/null; then
         crontab -l > cron.stop.tmp
         sed -i '/quickprep.sh stop '$PORT'/d' cron.stop.tmp
         crontab cron.stop.tmp
         rm -f cron.stop.tmp
 
-        echo "Stop schedule of Port $PORT is also dropped"
+        echo "Stop schedule of Port $PORT is dropped"
     fi
 }
 
@@ -162,7 +165,7 @@ create_service() {
     DATA_LIMIT=""
     TIME_LIMIT=""
     RESTART=0
-    # only options left in $@, otherwise getopts cannot recognize
+    # only options left in paras, otherwise getopts cannot recognize
     shift
     while getopts :p:d:t:r opt; do
         case $opt in
@@ -191,8 +194,8 @@ create_service() {
 
     # install pkg
     if ! dpkg -s shadowsocks-libev >/dev/null 2>&1; then
-        sudo apt-get update
-        sudo apt-get install -y shadowsocks-libev=3.3.5+ds-10build3
+        sudo apt-get update >/dev/null
+        sudo apt-get install -y shadowsocks-libev=3.3.5+ds-10build3 >/dev/null
         if [ $? -eq 0 ]; then
             echo "Finish installing shadowsocks-libev"
             # stop default service
@@ -204,7 +207,13 @@ create_service() {
     fi
     # call bash to write conf temp file
     bash `dirname "$0"`/write_conf.sh $PORT $PASSCODE
-    sudo mv ./$PORT.tmp /etc/shadowsocks-libev/$PORT.json
+    # prompt when start
+    sudo mv `[ $RESTART -eq 0 ] && echo '-i'` $PORT.tmp /etc/shadowsocks-libev/$PORT.json
+    if [ $? -ne 0 ]; then
+        rm -f $PORT.tmp
+        echo "The start execution interrupted"
+        exit 1
+    fi
     # start service
     sudo systemctl enable shadowsocks-libev-server@$PORT.service
     sudo systemctl restart shadowsocks-libev-server@$PORT.service
@@ -219,10 +228,14 @@ create_service() {
     # set data limit
     if [ -n "$DATA_LIMIT" ]; then
         create_data_limt $PORT "$DATA_LIMIT"
+    else
+        drop_data_limit $PORT
     fi
     # set stop schedule
     if [ -n "$TIME_LIMIT" ]; then
         create_stop_schedule $PORT "$TIME_LIMIT"
+    else
+        drop_stop_schedule $PORT
     fi
 }
 
@@ -237,10 +250,10 @@ disable_port() {
     # disable service
     sudo systemctl disable shadowsocks-libev-server@$PORT.service --now
     # remove conf file
-    sudo rm /etc/shadowsocks-libev/$PORT.json
+    sudo rm /etc/shadowsocks-libev/$PORT.json 2>/dev/null
     # show result
-    sudo systemctl status shadowsocks-libev-server@$PORT.service | awk 'NR==1 || NR ==3 {print}'
-    echo "Port $PORT is disabled, the service will disapear after server reboot"
+    sudo systemctl status shadowsocks-libev-server@$PORT.service 2>/dev/null | awk 'NR==1 || NR ==3 {print}'
+    echo "Port $PORT was disabled"
     # drop data limit and stop schedule if exists
     drop_data_limit $PORT
     drop_stop_schedule $PORT
@@ -250,7 +263,11 @@ disable_port() {
 # $1 port
 # -d left data volume/total data volume
 update_data_limit() {
+    PORT=$1
     # calculate the last data usage and update left data valume
+    crontab -l | grep "quickprep.sh updatelimit $PORT"
+    sudo iptables -vnx -L SSIN  --line-numbers | grep "$PORT" 
+    sudo iptables -vnx -L SSOUT --line-numbers | grep "$PORT" 
 
     # create next update schedule
 
@@ -265,33 +282,33 @@ show_status() {
         ports="$@"
     else
         # get port according with json file name
-        ports=`ls /etc/shadowsocks-libev/ | grep "^[0-9]" | rev | cut -d "." -f2- | rev`
+        ports=`ls /etc/shadowsocks-libev/ 2>/dev/null | grep "^[0-9]" | rev | cut -d "." -f2- | rev`
         if [ `expr length "${ports[@]}"` -eq 0 ]; then
             echo "No service is in use"
             exit 0
         fi
     fi
     # usage
-    sudo iptables -vn -L SSIN  --line-numbers > in_rules.tmp
-    sudo iptables -vn -L SSOUT --line-numbers > out_rules.tmp
+    sudo iptables -vn -L SSIN  --line-numbers 2>/dev/null > in_rules.tmp
+    sudo iptables -vn -L SSOUT --line-numbers 2>/dev/null > out_rules.tmp
 
     for port in $ports
     do
         # show result
-        sudo systemctl status shadowsocks-libev-server@$port.service | awk 'NR==1 || NR ==3 {print}'
+        sudo systemctl status shadowsocks-libev-server@$port.service 2>/dev/null | awk 'NR==1 || NR ==3 {print}'
         # show usage
-        if grep "$port" in_rules.tmp >/dev/null 2>&1; then
+        if grep "$port" in_rules.tmp >/dev/null; then
             grep -E "num|$port" in_rules.tmp
         fi
-        if grep "$port" out_rules.tmp >/dev/null 2>&1; then
+        if grep "$port" out_rules.tmp >/dev/null; then
             grep -E "num|$port" out_rules.tmp
         fi
         # show data limit and stop schedule if exists
-        crontab -l | grep "quickprep.sh updatelimit $port"
-        crontab -l | grep "quickprep.sh stop $port"
+        crontab -l 2>/dev/null | grep "quickprep.sh updatelimit $port"
+        crontab -l 2>/dev/null | grep "quickprep.sh stop $port"
     done
 
-    rm -f in_rules.tmp out_rules.tmp
+    sudo rm in_rules.tmp out_rules.tmp
 }
 
 COMD=$1
