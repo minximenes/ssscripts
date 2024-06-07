@@ -67,13 +67,19 @@ create_data_limt() {
     add_rules $PORT
     sudo service netfilter-persistent save >/dev/null
 
+    pdir=`dirname "$0"`
+    # backup same name file if exists
+    sudo mv "$pdir"/log/"$PORT".log "$pdir"/history/"$PORT"_"$(date '+%Y%m%dT%H:%M:%S')".log 2>/dev/null
+    # init data log file
+    echo "$(date '+%Y%m%dT%H:%M:%S')" "0 0 0 0 0 0 0" > "$pdir"/log/"$PORT".log
+
     # create update schedule
     crontab -l  2>/dev/null > cron.limit.tmp
     # delete before insert
     sed -i '/quickprep.sh updatelimit '$PORT'/d' cron.limit.tmp
-    # update every hours
+    # update every hours. usage/total(M)/total
     memo="0/"$maxbytes"M/"$DATA
-    echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash `dirname "$0"`/quickprep.sh updatelimit $PORT $memo">> cron.limit.tmp
+    echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updatelimit $PORT $memo">> cron.limit.tmp
     crontab cron.limit.tmp
     rm -f cron.limit.tmp
 
@@ -90,10 +96,10 @@ drop_data_limit() {
         del_rules $PORT
         sudo service netfilter-persistent save >/dev/null
 
-        crontab -l > cron.updatelimit.tmp
-        sed -i '/quickprep.sh updatelimit '$PORT'/d' cron.updatelimit.tmp
-        crontab cron.updatelimit.tmp
-        rm -f cron.updatelimit.tmp
+        crontab -l > cron.limit.tmp
+        sed -i '/quickprep.sh updatelimit '$PORT'/d' cron.limit.tmp
+        crontab cron.limit.tmp
+        rm -f cron.limit.tmps
 
         echo "Data limit of Port $PORT is dropped"
     fi
@@ -218,7 +224,7 @@ create_service() {
     sudo systemctl enable shadowsocks-libev-server@$PORT.service
     sudo systemctl restart shadowsocks-libev-server@$PORT.service
     # show result(only 1st and 3rd line)
-    sudo systemctl status shadowsocks-libev-server@$PORT.service | awk 'NR==1 || NR ==3 {print}'
+    sudo systemctl status shadowsocks-libev-server@$PORT.service | awk 'NR==1 || NR==3 {print}'
     echo "Please login with port $PORT and passcode $PASSCODE and AEAD chacha20-ietf-poly1305"
 
     # skip limit setting when restart
@@ -248,11 +254,13 @@ disable_port() {
         exit 1
     fi
     # disable service
-    sudo systemctl disable shadowsocks-libev-server@$PORT.service --now
+    if ! sudo systemctl disable shadowsocks-libev-server@$PORT.service --now >/dev/null 2>&1; then
+        exit 1
+    fi
     # remove conf file
     sudo rm /etc/shadowsocks-libev/$PORT.json 2>/dev/null
     # show result
-    sudo systemctl status shadowsocks-libev-server@$PORT.service 2>/dev/null | awk 'NR==1 || NR ==3 {print}'
+    sudo systemctl status shadowsocks-libev-server@$PORT.service | awk 'NR==1 || NR==3 {print}'
     echo "Port $PORT was disabled"
     # drop data limit and stop schedule if exists
     drop_data_limit $PORT
@@ -260,18 +268,63 @@ disable_port() {
 }
 
 # update the lastest limit and disable port if limit was over.
-# $1 port
-# -d left data volume/total data volume
+# $1 ports
 update_data_limit() {
     PORT=$1
     # calculate the last data usage and update left data valume
-    crontab -l | grep "quickprep.sh updatelimit $PORT"
-    sudo iptables -vnx -L SSIN  --line-numbers | grep "$PORT" 
-    sudo iptables -vnx -L SSOUT --line-numbers | grep "$PORT" 
+    # tail column, like 0/10240M/10G
+    usagestr=`crontab -l | grep "quickprep.sh updatelimit $PORT" | awk '{print $NF}'`
+    # MB
+    total=$(echo "$usagestr" | grep -oE '\/.*\/' | grep -oE '[0-9]+')
+    # bytes
+    sudo iptables -vnx -L SSIN  --line-numbers | grep "$PORT" > in_usage.tmp
+    sudo iptables -vnx -L SSOUT --line-numbers | grep "$PORT" > out_usage.tmp
+    tcp_in=$(grep "tcp" in_usage.tmp | awk '{print $3}')
+    udp_in=$(grep "udp" in_usage.tmp | awk '{print $3}')
+    tcp_out=$(grep "tcp" out_usage.tmp | awk '{print $3}')
+    udp_out=$(grep "udp" out_usage.tmp | awk '{print $3}')
+    sudo rm in_usage.tmp out_usage.tmp
 
-    # create next update schedule
+    pdir=`dirname "$0"`
+    # current io
+    cur_io=$(expr $tcp_in + $udp_in + $tcp_out + $udp_out)
+    # 0 timestamp | 1 tcpin| 2 udpin| 3 tcpout| 4 udpout| 5 current io| 6 diff| 7 usage
+    prevline=$(tail -n 1 "$pdir"/log/"$PORT".log)
+    IFS=' '
+    read -ra arr <<< "$preline"
+    prev_tcp_in=${arr[1]}
+    prev_udp_in=${arr[2]}
+    prev_tcp_out=${arr[3]}
+    prev_udp_out=${arr[4]}
+    prev_io=${arr[5]}
+    prev_usage=${arr[7]}
+    # calculate diff
+    if [ "$tcp_in" -ge "$prev_tcp_in"  && "$udp_in" -ge "$prev_udp_in"  && \
+         "$tcp_out" -ge "$prev_tcp_out"  && "$udp_out" -ge "$prev_udp_out" ]; then
+        # increase by degrees
+        diff=$(expr $cur_io - $prev_io)
+    else
+        # rules has been recounted
+        diff=$cur_io
+    fi
+    usage=$(expr $prev_usage + $diff)
+    # write to log
+    echo "$(date '+%Y%m%dT%H:%M:%S') $tcp_in $udp_in $tcp_out $udp_out $cur_io $diff $usage">> "$pdir"/log/"$PORT".log
 
-    # disable port
+    if [ "$usage" -lt "$((1024 * 1024 * total))" ]; then
+        # create next update schedule
+        crontab -l > cron.limit.tmp
+        # delete before insert
+        sed -i '/quickprep.sh updatelimit '$PORT'/d' cron.limit.tmp
+        # update every hours. usage/total(M)/total
+        memo=`sed -E 's/^[0-9]+/'$((usage / 1024 / 1024))'/' $usagestr`
+        echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updatelimit $PORT $memo">> cron.limit.tmp
+        crontab cron.limit.tmp
+        rm -f cron.limit.tmp
+    else
+        # disable port
+        disable_port $PORT
+    fi
     exit 0
 }
 
@@ -295,7 +348,7 @@ show_status() {
     for port in $ports
     do
         # show result
-        sudo systemctl status shadowsocks-libev-server@$port.service 2>/dev/null | awk 'NR==1 || NR ==3 {print}'
+        sudo systemctl status shadowsocks-libev-server@$port.service 2>/dev/null | awk 'NR==1 || NR==3 {print}'
         # show usage
         if grep "$port" in_rules.tmp >/dev/null; then
             grep -E "num|$port" in_rules.tmp
