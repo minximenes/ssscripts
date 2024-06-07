@@ -46,7 +46,8 @@ create_data_limt() {
 
     # install pkg
     if ! dpkg -s iptables-persistent >/dev/null 2>&1; then
-        sudo apt-get update >/dev/null
+        echo "updating and installing ..."
+        sudo apt-get update >/dev/null 2>&1
         # non interactive
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent >/dev/null
         if [ $? -eq 0 ]; then
@@ -71,9 +72,9 @@ create_data_limt() {
     pdir=`dirname "$0"`
     logfile="$pdir/log/$PORT.log"
     # backup same name file if exists
-    sudo mv $logfile $pdir/history/"$PORT"_"$(date '+%Y%m%dT%H:%M:%S')".log 2>/dev/null
+    mv $logfile $pdir/history/"$PORT"_"$(date '+%Y%m%dT%H:%M:%S')".log 2>/dev/null
     # init data log
-    echo "timestamp tcpin udpin tcpout udpout inout diff usage"> $logfile
+    echo "timestamp tcpin udpin tcpout udpout inout diff usage"> log.tmp && mv log.tmp $logfile
     echo "$(date '+%Y%m%dT%H:%M:%S') 0 0 0 0 0 0 0">> $logfile
 
     # create update schedule
@@ -203,7 +204,8 @@ create_service() {
 
     # install pkg
     if ! dpkg -s shadowsocks-libev >/dev/null 2>&1; then
-        sudo apt-get update >/dev/null
+        echo "updating and installing ..."
+        sudo apt-get update >/dev/null 2>&1
         sudo apt-get install -y shadowsocks-libev=3.3.5+ds-10build3 >/dev/null
         if [ $? -eq 0 ]; then
             echo "Finish installing shadowsocks-libev"
