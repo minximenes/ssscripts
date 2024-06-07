@@ -67,19 +67,22 @@ create_data_limt() {
     add_rules $PORT
     sudo service netfilter-persistent save >/dev/null
 
+    # create log
     pdir=`dirname "$0"`
+    logfile="$pdir/log/$PORT.log"
     # backup same name file if exists
-    sudo mv "$pdir"/log/"$PORT".log "$pdir"/history/"$PORT"_"$(date '+%Y%m%dT%H:%M:%S')".log 2>/dev/null
-    # init data log file
-    echo "$(date '+%Y%m%dT%H:%M:%S')" "0 0 0 0 0 0 0" > "$pdir"/log/"$PORT".log
+    sudo mv $logfile $pdir/history/"$PORT"_"$(date '+%Y%m%dT%H:%M:%S')".log 2>/dev/null
+    # init data log
+    echo "timestamp tcpin udpin tcpout udpout inout diff usage"> $logfile
+    echo "$(date '+%Y%m%dT%H:%M:%S') 0 0 0 0 0 0 0">> $logfile
 
     # create update schedule
     crontab -l  2>/dev/null > cron.limit.tmp
     # delete before insert
-    sed -i '/quickprep.sh updatelimit '$PORT'/d' cron.limit.tmp
-    # update every hours. usage/total(M)/total
+    sed -i '/updateusage '$PORT'/d' cron.limit.tmp
+    # update every hours. usage/total(MB)/total
     memo="0/"$maxbytes"M/"$DATA
-    echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updatelimit $PORT $memo">> cron.limit.tmp
+    echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updateusage $PORT $memo">> cron.limit.tmp
     crontab cron.limit.tmp
     rm -f cron.limit.tmp
 
@@ -91,13 +94,13 @@ create_data_limt() {
 drop_data_limit() {
     PORT=$1
 
-    if crontab -l 2>/dev/null | grep "quickprep.sh updatelimit $PORT" >/dev/null; then
+    if crontab -l 2>/dev/null | grep "updateusage $PORT" >/dev/null; then
         # delete port rules
         del_rules $PORT
         sudo service netfilter-persistent save >/dev/null
 
         crontab -l > cron.limit.tmp
-        sed -i '/quickprep.sh updatelimit '$PORT'/d' cron.limit.tmp
+        sed -i '/updateusage '$PORT'/d' cron.limit.tmp
         crontab cron.limit.tmp
         rm -f cron.limit.tmps
 
@@ -130,7 +133,7 @@ create_stop_schedule() {
     # insert scheduled task
     crontab -l  2>/dev/null > cron.stop.tmp
     # delete before insert
-    sed -i '/quickprep.sh stop '$PORT'/d' cron.stop.tmp
+    sed -i '/stop '$PORT'/d' cron.stop.tmp
     memo=$(date -d "$begintime" '+%Y-%m-%dT%H:%M:%S')"/"$PERIOD
     echo $(date -d "$endtime" '+%M %H %d %m') "*" "bash `dirname "$0"`/quickprep.sh stop $PORT $memo" >> cron.stop.tmp
     crontab cron.stop.tmp
@@ -144,9 +147,9 @@ create_stop_schedule() {
 drop_stop_schedule() {
     PORT=$1
 
-    if crontab -l 2>/dev/null | grep "quickprep.sh stop $PORT" >/dev/null; then
+    if crontab -l 2>/dev/null | grep "stop $PORT" >/dev/null; then
         crontab -l > cron.stop.tmp
-        sed -i '/quickprep.sh stop '$PORT'/d' cron.stop.tmp
+        sed -i '/stop '$PORT'/d' cron.stop.tmp
         crontab cron.stop.tmp
         rm -f cron.stop.tmp
 
@@ -212,7 +215,7 @@ create_service() {
         fi
     fi
     # call bash to write conf temp file
-    bash `dirname "$0"`/write_conf.sh $PORT $PASSCODE
+    bash `dirname "$0"`/write_conf.sh $PORT "$PASSCODE"
     # prompt when start
     sudo mv `[ $RESTART -eq 0 ] && echo '-i'` $PORT.tmp /etc/shadowsocks-libev/$PORT.json
     if [ $? -ne 0 ]; then
@@ -267,14 +270,14 @@ disable_port() {
     drop_stop_schedule $PORT
 }
 
-# update the lastest limit and disable port if limit was over.
+# update the latest usage and disable port if usage reached the limit.
 # $1 ports
-update_data_limit() {
+update_usage() {
     PORT=$1
-    # calculate the last data usage and update left data valume
-    # tail column, like 0/10240M/10G
-    usagestr=`crontab -l | grep "quickprep.sh updatelimit $PORT" | awk '{print $NF}'`
-    # MB
+    # calculate the latest data usage
+    # tail column, usage/total(MB)/total, for example 0/10240M/10G
+    usagestr=`crontab -l | grep "updateusage $PORT" | awk '{print $NF}'`
+    # get total(MB)
     total=$(echo "$usagestr" | grep -oE '\/.*\/' | grep -oE '[0-9]+')
     # bytes
     sudo iptables -vnx -L SSIN  --line-numbers | grep "$PORT" > in_usage.tmp
@@ -288,8 +291,8 @@ update_data_limit() {
     pdir=`dirname "$0"`
     # current io
     cur_io=$(expr $tcp_in + $udp_in + $tcp_out + $udp_out)
-    # 0 timestamp | 1 tcpin| 2 udpin| 3 tcpout| 4 udpout| 5 current io| 6 diff| 7 usage
-    prevline=$(tail -n 1 "$pdir"/log/"$PORT".log)
+    # 0 timestamp | 1 tcpin| 2 udpin| 3 tcpout| 4 udpout| 5 inout| 6 diff| 7 usage
+    prevline=$(tail -n 1 $pdir/log/$PORT.log)
     IFS=' '
     read -ra arr <<< "$preline"
     prev_tcp_in=${arr[1]}
@@ -308,24 +311,23 @@ update_data_limit() {
         diff=$cur_io
     fi
     usage=$(expr $prev_usage + $diff)
-    # write to log
-    echo "$(date '+%Y%m%dT%H:%M:%S') $tcp_in $udp_in $tcp_out $udp_out $cur_io $diff $usage">> "$pdir"/log/"$PORT".log
+    # write log
+    echo "$(date '+%Y%m%dT%H:%M:%S') $tcp_in $udp_in $tcp_out $udp_out $cur_io $diff $usage">> $pdir/log/$PORT.log
 
     if [ "$usage" -lt "$((1024 * 1024 * total))" ]; then
         # create next update schedule
         crontab -l > cron.limit.tmp
         # delete before insert
-        sed -i '/quickprep.sh updatelimit '$PORT'/d' cron.limit.tmp
-        # update every hours. usage/total(M)/total
+        sed -i '/updateusage '$PORT'/d' cron.limit.tmp
+        # update usage. usage/total(MB)/total
         memo=`sed -E 's/^[0-9]+/'$((usage / 1024 / 1024))'/' $usagestr`
-        echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updatelimit $PORT $memo">> cron.limit.tmp
+        echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updateusage $PORT $memo">> cron.limit.tmp
         crontab cron.limit.tmp
         rm -f cron.limit.tmp
     else
-        # disable port
+        # disable port when usage reached the limit
         disable_port $PORT
     fi
-    exit 0
 }
 
 # show stauts
@@ -357,8 +359,8 @@ show_status() {
             grep -E "num|$port" out_rules.tmp
         fi
         # show data limit and stop schedule if exists
-        crontab -l 2>/dev/null | grep "quickprep.sh updatelimit $port"
-        crontab -l 2>/dev/null | grep "quickprep.sh stop $port"
+        crontab -l 2>/dev/null | grep "updateusage $port"
+        crontab -l 2>/dev/null | grep "stop $port"
     done
 
     sudo rm in_rules.tmp out_rules.tmp
@@ -382,9 +384,9 @@ case "$COMD" in
     status)
         show_status $@
         ;;
-    updatelimit)
+    updateusage)
         # for inner use
-        update_data_limit $@
+        update_usage $@
         ;;
     *)
         echo "Plese input start|restart|stop|status"
