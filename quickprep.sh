@@ -3,20 +3,20 @@
 # calculate usage's update interval
 # $1 usage(B)
 # $2 total(MB)
-function calc_interval() {
+calc_interval() {
     usage=$1
     total=$2
     left=$(expr $((1024 * 1024 * total)) - $usage)
 
     if [ $left -le $((100 * 1024 * 1024)) ]; then
         # less or equal to 100M
-        return "10 minute"
+        echo "10 minute"
     elif [ $left -le $((1024 * 1024 * 1024)) ]; then
         # less or equal to 1G
-        return "30 minute"
+        echo "30 minute"
     else
         # more than 1G
-        return "1 hour"
+        echo "1 hour"
     fi
 }
 
@@ -102,10 +102,10 @@ create_data_limt() {
     # create update schedule
     crontab -l  2>/dev/null > cron.limit.tmp
     # delete before insert
-    sed -i '/updateusage '$PORT'/d' cron.limit.tmp
+    sed -i '/usage '$PORT'/d' cron.limit.tmp
     # update every hours. usage/total(MB)/total
     memo="0/"$maxmb"M/"$DATA
-    echo $(date -d "$(date) ${calc_interval 0 $maxmb}" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updateusage $PORT $memo">> cron.limit.tmp
+    echo $(date -d "$(date) $(calc_interval 0 $maxmb)" '+%M %H %d %m') "*" "bash $0 usage $PORT $memo">> cron.limit.tmp
     crontab cron.limit.tmp
     rm -f cron.limit.tmp
 
@@ -117,13 +117,13 @@ create_data_limt() {
 drop_data_limit() {
     PORT=$1
 
-    if crontab -l 2>/dev/null | grep "updateusage $PORT" >/dev/null; then
+    if crontab -l 2>/dev/null | grep "usage $PORT" >/dev/null; then
         # delete port rules
         del_rules $PORT
         sudo service netfilter-persistent save >/dev/null
 
         crontab -l > cron.limit.tmp
-        sed -i '/updateusage '$PORT'/d' cron.limit.tmp
+        sed -i '/usage '$PORT'/d' cron.limit.tmp
         crontab cron.limit.tmp
         rm -f cron.limit.tmp
 
@@ -158,7 +158,7 @@ create_stop_schedule() {
     # delete before insert
     sed -i '/stop '$PORT'/d' cron.stop.tmp
     memo=$(date -d "$begintime" '+%Y-%m-%dT%H:%M:%S')"/"$PERIOD
-    echo $(date -d "$endtime" '+%M %H %d %m') "*" "bash `dirname "$0"`/quickprep.sh stop $PORT $memo" >> cron.stop.tmp
+    echo $(date -d "$endtime" '+%M %H %d %m') "*" "bash $0 stop $PORT $memo" >> cron.stop.tmp
     crontab cron.stop.tmp
     rm -f cron.stop.tmp
 
@@ -304,7 +304,7 @@ update_usage() {
     fi
     # calculate the latest data usage
     # tail column, usage/total(MB)/total, for example 0/10240M/10G
-    usagestr=`crontab -l | grep "updateusage $PORT" | awk '{print $NF}'`
+    usagestr=`crontab -l | grep "usage $PORT" | awk '{print $NF}'`
     # get total(MB)
     total=$(echo "$usagestr" | grep -oE '\/.*\/' | grep -oE '[0-9]+')
 
@@ -349,15 +349,16 @@ update_usage() {
         # create next update schedule
         crontab -l > cron.limit.tmp
         # delete before insert
-        sed -i '/updateusage '$PORT'/d' cron.limit.tmp
+        sed -i '/usage '$PORT'/d' cron.limit.tmp
         # update usage. usage/total(MB)/total
         memo="$((usage / 1024 / 1024))"$(echo "$usagestr" | grep -oE '\/.*')
-        echo $(date -d "$(date) ${calc_interval $usage $total}" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updateusage $PORT $memo">> cron.limit.tmp
+        echo $(date -d "$(date) $(calc_interval $usage $total)" '+%M %H %d %m') "*" "bash $0 usage $PORT $memo">> cron.limit.tmp
         crontab cron.limit.tmp
         rm -f cron.limit.tmp
     else
         # disable port when usage reached the limit
-        echo "Close because of limit reaching">> $pdir/log/$PORT.log
+        # output to terminal and log
+        echo "Close because of limit reaching $((usage / 1024 / 1024))M" | tee -a $pdir/log/$PORT.log
         disable_port $PORT
     fi
 }
@@ -391,7 +392,7 @@ show_status() {
             grep -E "num|$port" out_rules.tmp
         fi
         # show data limit and stop schedule if exists
-        crontab -l 2>/dev/null | grep "updateusage $port"
+        crontab -l 2>/dev/null | grep "usage $port"
         crontab -l 2>/dev/null | grep "stop $port"
     done
 
@@ -416,7 +417,7 @@ case "$COMD" in
     status)
         show_status $@
         ;;
-    updateusage)
+    usage)
         # for inner use
         update_usage $@
         ;;
