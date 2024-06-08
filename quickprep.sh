@@ -1,5 +1,25 @@
 #!/bin/bash
 
+# calculate usage's update interval
+# $1 usage(B)
+# $2 total(MB)
+function calc_interval() {
+    usage=$1
+    total=$2
+    left=$(expr $((1024 * 1024 * total)) - $usage)
+
+    if [ $left -le $((100 * 1024 * 1024)) ]; then
+        # less or equal to 100M
+        return "10 minute"
+    elif [ $left -le $((1024 * 1024 * 1024)) ]; then
+        # less or equal to 1G
+        return "30 minute"
+    else
+        # more than 1G
+        return "1 hour"
+    fi
+}
+
 # add rules by port
 # $1 port
 add_rules() {
@@ -37,10 +57,10 @@ create_data_limt() {
     fi
     case $unit in
         M)
-            maxbytes=$num
+            maxmb=$num
             ;;
         G)
-            maxbytes=$((1024 * num))
+            maxmb=$((1024 * num))
             ;;
     esac
 
@@ -84,8 +104,8 @@ create_data_limt() {
     # delete before insert
     sed -i '/updateusage '$PORT'/d' cron.limit.tmp
     # update every hours. usage/total(MB)/total
-    memo="0/"$maxbytes"M/"$DATA
-    echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updateusage $PORT $memo">> cron.limit.tmp
+    memo="0/"$maxmb"M/"$DATA
+    echo $(date -d "$(date) ${calc_interval 0 $maxmb}" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updateusage $PORT $memo">> cron.limit.tmp
     crontab cron.limit.tmp
     rm -f cron.limit.tmp
 
@@ -105,7 +125,7 @@ drop_data_limit() {
         crontab -l > cron.limit.tmp
         sed -i '/updateusage '$PORT'/d' cron.limit.tmp
         crontab cron.limit.tmp
-        rm -f cron.limit.tmps
+        rm -f cron.limit.tmp
 
         echo "Data limit of Port $PORT is dropped"
     fi
@@ -129,7 +149,7 @@ create_stop_schedule() {
     endtime=$(date -d "$begintime $num $unit" '+%Y-%m-%d %H:%M:%S')
 
     max=$(date -d "$begintime 12 month" '+%Y-%m-%d %H:%M:%S')
-    if [ "$endtime" \> "$max" ]; then
+    if [[ "$endtime" > "$max" ]]; then
         echo "Period is over one year. Please input period less than that"
         exit 1
     fi
@@ -278,11 +298,16 @@ disable_port() {
 # $1 ports
 update_usage() {
     PORT=$1
+    if [ -z $PORT ]; then
+        echo "Please input port number you want to calculate"
+        exit 1
+    fi
     # calculate the latest data usage
     # tail column, usage/total(MB)/total, for example 0/10240M/10G
     usagestr=`crontab -l | grep "updateusage $PORT" | awk '{print $NF}'`
     # get total(MB)
     total=$(echo "$usagestr" | grep -oE '\/.*\/' | grep -oE '[0-9]+')
+
     # bytes
     sudo iptables -vnx -L SSIN  --line-numbers | grep "$PORT" > in_usage.tmp
     sudo iptables -vnx -L SSOUT --line-numbers | grep "$PORT" > out_usage.tmp
@@ -291,22 +316,24 @@ update_usage() {
     tcp_out=$(grep "tcp" out_usage.tmp | awk '{print $3}')
     udp_out=$(grep "udp" out_usage.tmp | awk '{print $3}')
     sudo rm in_usage.tmp out_usage.tmp
-
-    pdir=`dirname "$0"`
     # current io
     cur_io=$(expr $tcp_in + $udp_in + $tcp_out + $udp_out)
+
+    pdir=`dirname "$0"`
     # 0 timestamp | 1 tcpin| 2 udpin| 3 tcpout| 4 udpout| 5 inout| 6 diff| 7 usage
     prevline=$(tail -n 1 $pdir/log/$PORT.log)
     IFS=' '
-    read -ra arr <<< "$preline"
+    read -ra arr <<< "$prevline"
     prev_tcp_in=${arr[1]}
     prev_udp_in=${arr[2]}
     prev_tcp_out=${arr[3]}
     prev_udp_out=${arr[4]}
     prev_io=${arr[5]}
     prev_usage=${arr[7]}
+
     # calculate diff
-    if [ "$tcp_in" -ge "$prev_tcp_in" && "$udp_in" -ge "$prev_udp_in" && "$tcp_out" -ge "$prev_tcp_out" && "$udp_out" -ge "$prev_udp_out" ]; then
+    if [ $tcp_in -ge $prev_tcp_in ] && [ $udp_in -ge $prev_udp_in ] && \
+       [ $tcp_out -ge $prev_tcp_out ] && [ $udp_out -ge $prev_udp_out ]; then
         # increase by degrees
         diff=$(expr $cur_io - $prev_io)
     else
@@ -314,21 +341,23 @@ update_usage() {
         diff=$cur_io
     fi
     usage=$(expr $prev_usage + $diff)
+
     # write log
     echo "$(date '+%Y%m%dT%H:%M:%S') $tcp_in $udp_in $tcp_out $udp_out $cur_io $diff $usage">> $pdir/log/$PORT.log
 
-    if [ "$usage" -lt "$((1024 * 1024 * total))" ]; then
+    if [ $usage -lt $((1024 * 1024 * total)) ]; then
         # create next update schedule
         crontab -l > cron.limit.tmp
         # delete before insert
         sed -i '/updateusage '$PORT'/d' cron.limit.tmp
         # update usage. usage/total(MB)/total
-        memo=`sed -E 's/^[0-9]+/'$((usage / 1024 / 1024))'/' $usagestr`
-        echo $(date -d "$(date) 1 hour" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updateusage $PORT $memo">> cron.limit.tmp
+        memo="$((usage / 1024 / 1024))"$(echo "$usagestr" | grep -oE '\/.*')
+        echo $(date -d "$(date) ${calc_interval $usage $total}" '+%M %H %d %m') "*" "bash $pdir/quickprep.sh updateusage $PORT $memo">> cron.limit.tmp
         crontab cron.limit.tmp
         rm -f cron.limit.tmp
     else
         # disable port when usage reached the limit
+        echo "Close because of limit reaching">> $pdir/log/$PORT.log
         disable_port $PORT
     fi
 }
