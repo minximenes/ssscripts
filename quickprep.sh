@@ -70,11 +70,13 @@ create_data_limt() {
 
     # create log
     pdir=`dirname "$0"`
+    [ ! -d "$pdir/log" ] && mkdir -p "$pdir/log"
+    [ ! -d "$pdir/history" ] && mkdir -p "$pdir/history"
     logfile="$pdir/log/$PORT.log"
     # backup same name file if exists
-    mv $logfile $pdir/history/"$PORT"_"$(date '+%Y%m%dT%H:%M:%S')".log 2>/dev/null
+    mv $logfile $pdir/history/"$PORT"_"$(date '+%Y%m%dT%H%M%S')".log 2>/dev/null
     # init data log
-    echo "timestamp tcpin udpin tcpout udpout inout diff usage"> log.tmp && mv log.tmp $logfile
+    echo "timestamp tcpin udpin tcpout udpout inout diff usage"> $logfile
     echo "$(date '+%Y%m%dT%H:%M:%S') 0 0 0 0 0 0 0">> $logfile
 
     # create update schedule
@@ -304,8 +306,7 @@ update_usage() {
     prev_io=${arr[5]}
     prev_usage=${arr[7]}
     # calculate diff
-    if [ "$tcp_in" -ge "$prev_tcp_in"  && "$udp_in" -ge "$prev_udp_in"  && \
-         "$tcp_out" -ge "$prev_tcp_out"  && "$udp_out" -ge "$prev_udp_out" ]; then
+    if [ "$tcp_in" -ge "$prev_tcp_in" && "$udp_in" -ge "$prev_udp_in" && "$tcp_out" -ge "$prev_tcp_out" && "$udp_out" -ge "$prev_udp_out" ]; then
         # increase by degrees
         diff=$(expr $cur_io - $prev_io)
     else
