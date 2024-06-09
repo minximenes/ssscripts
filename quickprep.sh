@@ -374,7 +374,7 @@ update_usage() {
     else
         # disable port when usage reached the limit
         # output to terminal and log
-        echo "Close port $PORT because of limit reaching $usage_mb/$total""M" | tee -a $pdir/log/$PORT.log
+        echo "Close port $PORT because of limit reaching. $usage_mb/$total""M" | tee -a $pdir/log/$PORT.log
         disable_port $PORT
     fi
 }
