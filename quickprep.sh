@@ -42,6 +42,32 @@ del_rules() {
     sudo iptables -D SSOUT -p udp --sport $PORT -j ACCEPT 2>/dev/null
 }
 
+# add cron task
+# $1 key str to delete
+# $2 str to add
+add_cron() {
+    delstr=$1
+    addstr=$2
+
+    crontab -l  2>/dev/null > cron.add.tmp
+    # delete before insert
+    sed -i '/'$delstr'/d' cron.add.tmp
+    echo "$addstr">> cron.add.tmp
+    crontab cron.add.tmp
+    rm -f cron.add.tmp
+}
+
+# delete cron task
+# $1 key str for delete
+del_cron() {
+    delstr=$1
+
+    crontab -l > cron.del.tmp
+    sed -i '/'$delstr'/d' cron.del.tmp
+    crontab cron.del.tmp
+    rm -f cron.del.tmp
+}
+
 # create in/out chain by port
 # $1 port
 # $2 data limit. Format should be 100M/20G
@@ -100,14 +126,12 @@ create_data_limt() {
     echo "$(date '+%Y%m%dT%H:%M:%S') 0 0 0 0 0 0 0">> $logfile
 
     # create update schedule
-    crontab -l  2>/dev/null > cron.limit.tmp
-    # delete before insert
-    sed -i '/usage '$PORT'/d' cron.limit.tmp
-    # update every hours. usage/total(MB)/total
+    # usage/total(MB)/total
     memo="0/"$maxmb"M/"$DATA
-    echo $(date -d "$(date) $(calc_interval 0 $maxmb)" '+%M %H %d %m') "*" "bash $0 usage $PORT $memo">> cron.limit.tmp
-    crontab cron.limit.tmp
-    rm -f cron.limit.tmp
+    # update in interval time
+    addstr=`echo $(date -d "$(date) $(calc_interval 0 $maxmb)" '+%M %H %d %m') "*" "bash $0 cronusage $PORT $memo"`
+    # add cron task
+    add_cron "usage $PORT" "$addstr"
 
     echo "Port $PORT's data limit: $DATA"
 }
@@ -121,11 +145,8 @@ drop_data_limit() {
         # delete port rules
         del_rules $PORT
         sudo service netfilter-persistent save >/dev/null
-
-        crontab -l > cron.limit.tmp
-        sed -i '/usage '$PORT'/d' cron.limit.tmp
-        crontab cron.limit.tmp
-        rm -f cron.limit.tmp
+        # delete cron task
+        del_cron "usage $PORT"
 
         echo "Data limit of Port $PORT is dropped"
     fi
@@ -154,13 +175,10 @@ create_stop_schedule() {
         exit 1
     fi
     # insert scheduled task
-    crontab -l  2>/dev/null > cron.stop.tmp
-    # delete before insert
-    sed -i '/stop '$PORT'/d' cron.stop.tmp
     memo=$(date -d "$begintime" '+%Y-%m-%dT%H:%M:%S')"/"$PERIOD
-    echo $(date -d "$endtime" '+%M %H %d %m') "*" "bash $0 stop $PORT $memo" >> cron.stop.tmp
-    crontab cron.stop.tmp
-    rm -f cron.stop.tmp
+    addstr=`echo $(date -d "$endtime" '+%M %H %d %m') "*" "bash $0 cronstop $PORT $memo"`
+    # add cron task
+    add_cron "stop $PORT" "$addstr"
 
     echo "Port $PORT is beginning at $begintime and will expire at $endtime"
 }
@@ -171,10 +189,8 @@ drop_stop_schedule() {
     PORT=$1
 
     if crontab -l 2>/dev/null | grep "stop $PORT" >/dev/null; then
-        crontab -l > cron.stop.tmp
-        sed -i '/stop '$PORT'/d' cron.stop.tmp
-        crontab cron.stop.tmp
-        rm -f cron.stop.tmp
+        # delete cron task
+        del_cron "stop $PORT"
 
         echo "Stop schedule of Port $PORT is dropped"
     fi
@@ -219,9 +235,9 @@ create_service() {
                 ;;
         esac
     done
-    # set default passcode
+    # set random passcode
     if [ -z "$PASSCODE" ]; then
-        PASSCODE="9527"
+        PASSCODE=`for i in {1..6}; do echo -n $((RANDOM % 10)); done`
     fi
 
     # install pkg
@@ -341,24 +357,24 @@ update_usage() {
         diff=$cur_io
     fi
     usage=$(expr $prev_usage + $diff)
+    usage_mb=$((usage / 1024 / 1024))
 
     # write log
     echo "$(date '+%Y%m%dT%H:%M:%S') $tcp_in $udp_in $tcp_out $udp_out $cur_io $diff $usage">> $pdir/log/$PORT.log
 
     if [ $usage -lt $((1024 * 1024 * total)) ]; then
         # create next update schedule
-        crontab -l > cron.limit.tmp
-        # delete before insert
-        sed -i '/usage '$PORT'/d' cron.limit.tmp
         # update usage. usage/total(MB)/total
-        memo="$((usage / 1024 / 1024))"$(echo "$usagestr" | grep -oE '\/.*')
-        echo $(date -d "$(date) $(calc_interval $usage $total)" '+%M %H %d %m') "*" "bash $0 usage $PORT $memo">> cron.limit.tmp
-        crontab cron.limit.tmp
-        rm -f cron.limit.tmp
+        memo="$usage_mb"$(echo "$usagestr" | grep -oE '\/.*')
+        addstr=`echo $(date -d "$(date) $(calc_interval $usage $total)" '+%M %H %d %m') "*" "bash $0 cronusage $PORT $memo"`
+        # add cron task
+        add_cron "usage $PORT" "$addstr"
+
+        echo "Update port $PORT's data usage: $usage_mb/$total""M"
     else
         # disable port when usage reached the limit
         # output to terminal and log
-        echo "Close because of limit reaching $((usage / 1024 / 1024))M" | tee -a $pdir/log/$PORT.log
+        echo "Close port $PORT because of limit reaching $usage_mb/$total""M" | tee -a $pdir/log/$PORT.log
         disable_port $PORT
     fi
 }
@@ -399,29 +415,32 @@ show_status() {
     sudo rm in_rules.tmp out_rules.tmp
 }
 
+LOG=`dirname "$0"`/console.log
+# log of beginning
+echo -e "\n$(date '+%Y-%m-%d %H:%M:%S') $@\n">> $LOG
+
 COMD=$1
 # shift 1 position and $@ will start from old 2nd para
 shift
 
-# only surpport start|restart|stop|status
+# only surpport start|restart|stop|status|usage
 case "$COMD" in
     start)
-        create_service $@
+        create_service $@ | tee -a $LOG
         ;;
     restart)
-        create_service $@ -r
+        create_service $@ -r | tee -a $LOG
         ;;
-    stop)
-        disable_port $@
+    stop|cronstop)
+        disable_port $@ | tee -a $LOG
         ;;
     status)
-        show_status $@
+        show_status $@ | tee -a $LOG
         ;;
-    usage)
-        # for inner use
-        update_usage $@
+    usage|cronusage)
+        update_usage $@ | tee -a $LOG
         ;;
     *)
-        echo "Plese input start|restart|stop|status"
+        echo "Plese input start|restart|stop|status|usage"
         ;;
 esac
