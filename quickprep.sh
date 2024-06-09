@@ -51,7 +51,7 @@ add_cron() {
 
     crontab -l  2>/dev/null > cron.add.tmp
     # delete before insert
-    sed -i '/'$delstr'/d' cron.add.tmp
+    sed -i "/$delstr/d" cron.add.tmp
     echo "$addstr">> cron.add.tmp
     crontab cron.add.tmp
     rm -f cron.add.tmp
@@ -63,7 +63,7 @@ del_cron() {
     delstr=$1
 
     crontab -l > cron.del.tmp
-    sed -i '/'$delstr'/d' cron.del.tmp
+    sed -i "/$delstr/d" cron.del.tmp
     crontab cron.del.tmp
     rm -f cron.del.tmp
 }
@@ -426,19 +426,19 @@ shift
 # only surpport start|restart|stop|status|usage
 case "$COMD" in
     start)
-        create_service $@ | tee -a $LOG
+        create_service $@ 2>&1 | tee -a $LOG
         ;;
     restart)
-        create_service $@ -r | tee -a $LOG
+        create_service $@ -r 2>&1 | tee -a $LOG
         ;;
     stop|cronstop)
-        disable_port $@ | tee -a $LOG
+        disable_port $@ 2>&1 | tee -a $LOG
         ;;
     status)
-        show_status $@ | tee -a $LOG
+        show_status $@ 2>&1 | tee -a $LOG
         ;;
     usage|cronusage)
-        update_usage $@ | tee -a $LOG
+        update_usage $@ 2>&1 | tee -a $LOG
         ;;
     *)
         echo "Plese input start|restart|stop|status|usage"
