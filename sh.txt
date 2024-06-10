@@ -1,2 +1,3 @@
 https://raw.githubusercontent.com/minximenes/ssscripts/main/quickprep.sh
 https://raw.githubusercontent.com/minximenes/ssscripts/main/write_conf.sh
+https://raw.githubusercontent.com/minximenes/ssscripts/main/help.txt
