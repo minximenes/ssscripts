@@ -1,0 +1,14 @@
+init
+start [port]
+    -p passcode
+        Optional. Will create random passcode of six bytes if not given
+    -d datalimit
+        Optinal. Example as 99minute/hour/day/month. No data limit if not given
+    -t timelimit
+        Optinal. Example as 99M/G. No time limit if not given
+restart [port]
+    -p passcode
+stop [port]
+status [port]
+    port is optional, show all in-use port's info if not given
+usage [port]
