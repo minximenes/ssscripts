@@ -334,6 +334,10 @@ update_usage() {
     # calculate the latest data usage
     # tail column, usage/total(MB)/total, for example 0/10240M/10G
     usagestr=`crontab -l | grep "usage $PORT" | awk '{print $NF}'`
+    if [ -z "$usagestr" ]; then
+        echo "There is no data limit setting in this port"
+        exit 0
+    fi
     # get total(MB)
     total=$(echo "$usagestr" | grep -oE '\/.*\/' | grep -oE '[0-9]+')
 
@@ -458,5 +462,6 @@ case "$COMD" in
         ;;
     *)
         echo "Plese input init|start|restart|stop|status|usage"
+        cat `dirname "$0"`/help.txt
         ;;
 esac
