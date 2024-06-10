@@ -20,6 +20,14 @@ calc_interval() {
     fi
 }
 
+# init chain
+init_chain() {
+    sudo iptables -N SSIN
+    sudo iptables -N SSOUT
+    sudo iptables -A INPUT  -j SSIN
+    sudo iptables -A OUTPUT -j SSOUT
+}
+
 # add rules by port
 # $1 port
 add_rules() {
@@ -68,6 +76,15 @@ del_cron() {
     rm -f cron.del.tmp
 }
 
+# init environment installing
+init_env() {
+    sudo apt-get update
+    sudo apt-get install -y shadowsocks-libev
+    # non interactive
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+    init_chain
+}
+
 # create in/out chain by port
 # $1 port
 # $2 data limit. Format should be 100M/20G
@@ -98,11 +115,7 @@ create_data_limt() {
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent >/dev/null
         if [ $? -eq 0 ]; then
             echo "Finish installing iptables-persistent"
-            # init chain
-            sudo iptables -N SSIN
-            sudo iptables -N SSOUT
-            sudo iptables -A INPUT  -j SSIN
-            sudo iptables -A OUTPUT -j SSOUT
+            init_chain
         else
             echo "Failed to install iptables-persistent. Please check error message"
             exit 1
@@ -244,7 +257,7 @@ create_service() {
     if ! dpkg -s shadowsocks-libev >/dev/null 2>&1; then
         echo "updating and installing ..."
         sudo apt-get update >/dev/null 2>&1
-        sudo apt-get install -y shadowsocks-libev=3.3.5+ds-10build3 >/dev/null
+        sudo apt-get install -y shadowsocks-libev >/dev/null
         if [ $? -eq 0 ]; then
             echo "Finish installing shadowsocks-libev"
             # stop default service
@@ -423,8 +436,11 @@ COMD=$1
 # shift 1 position and $@ will start from old 2nd para
 shift
 
-# only surpport start|restart|stop|status|usage
+# only surpport init|start|restart|stop|status|usage
 case "$COMD" in
+    init)
+        init_env
+        ;;
     start)
         create_service $@ 2>&1 | tee -a $LOG
         ;;
@@ -441,6 +457,6 @@ case "$COMD" in
         update_usage $@ 2>&1 | tee -a $LOG
         ;;
     *)
-        echo "Plese input start|restart|stop|status|usage"
+        echo "Plese input init|start|restart|stop|status|usage"
         ;;
 esac
