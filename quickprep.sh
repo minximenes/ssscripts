@@ -80,6 +80,8 @@ del_cron() {
 init_env() {
     sudo apt-get update
     sudo apt-get install -y shadowsocks-libev
+    # stop default service
+    sudo systemctl disable shadowsocks-libev --now
     # non interactive
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
     init_chain
@@ -335,7 +337,7 @@ update_usage() {
     # tail column, usage/total(MB)/total, for example 0/10240M/10G
     usagestr=`crontab -l | grep "usage $PORT" | awk '{print $NF}'`
     if [ -z "$usagestr" ]; then
-        echo "There is no data limit setting in this port"
+        echo "There is no data limit setting on this port"
         exit 0
     fi
     # get total(MB)
