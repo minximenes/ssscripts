@@ -142,7 +142,7 @@ create_data_limt() {
             # http service
             start_http >/dev/null
             sudo systemctl status flaskhttp.service | awk 'NR==1 || NR==3 {print}'
-            echo "Finish installing http service. http://beautgpt.com:5000/log/[port][password[:4]]"
+            echo "Finish installing http service. http://[serverip]:5000/log/[port][password[:4]]"
         else
             echo "Failed to install iptables-persistent. Please check error message"
             exit 1
