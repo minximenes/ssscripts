@@ -1,4 +1,5 @@
 https://raw.githubusercontent.com/minximenes/ssscripts/main/quickprep.sh
 https://raw.githubusercontent.com/minximenes/ssscripts/main/write_conf.sh
 https://raw.githubusercontent.com/minximenes/ssscripts/main/help.txt
+https://raw.githubusercontent.com/minximenes/ssscripts/main/write_http.sh
 https://raw.githubusercontent.com/minximenes/ssscripts/main/httpservice.py
