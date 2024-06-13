@@ -76,6 +76,25 @@ del_cron() {
     rm -f cron.del.tmp
 }
 
+# start flask http server
+start_http() {
+    # install py3
+    sudo apt-get install python3 python3-pip
+    # install flask and gunicorn by py
+    sudo pip3 install Flask
+    sudo pip3 install Flask gunicorn
+
+    # call bash to write http conf file
+    pdir=`dirname "$0"`
+    # get absolute path
+    bash $pdir/write_http.sh $(cd "$pdir" &>/dev/null && pwd)
+    sudo mv http.tmp /etc/systemd/system/flaskhttp.service
+    # enable flaskhttp service
+    sudo systemctl daemon-reload
+    sudo systemctl enable flaskhttp.service
+    sudo systemctl restart flaskhttp.service
+}
+
 # init environment installing
 init_env() {
     sudo apt-get update
@@ -85,6 +104,8 @@ init_env() {
     # non interactive
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
     init_chain
+    # http service
+    start_http
 }
 
 # create in/out chain by port
@@ -118,6 +139,10 @@ create_data_limt() {
         if [ $? -eq 0 ]; then
             echo "Finish installing iptables-persistent"
             init_chain
+            # http service
+            start_http >/dev/null
+            sudo systemctl status flaskhttp.service | awk 'NR==1 || NR==3 {print}'
+            echo "Finish installing http service. http://beautgpt.com:5000/log/[port][password[:4]]"
         else
             echo "Failed to install iptables-persistent. Please check error message"
             exit 1
@@ -137,8 +162,8 @@ create_data_limt() {
     # backup same name file if exists
     mv $logfile $pdir/history/"$PORT"_"$(date '+%Y%m%dT%H%M%S')".log 2>/dev/null
     # init data log
-    echo "timestamp tcpin udpin tcpout udpout inout diff usage"> $logfile
-    echo "$(date '+%Y%m%dT%H:%M:%S') 0 0 0 0 0 0 0">> $logfile
+    echo "timestamp tcpin udpin tcpout udpout inout diff usage usage(MB)"> $logfile
+    echo "$(date '+%Y%m%dT%H:%M:%S') 0 0 0 0 0 0 0 0M">> $logfile
 
     # create update schedule
     # usage/total(MB)/total
@@ -252,7 +277,7 @@ create_service() {
     done
     # set random passcode
     if [ -z "$PASSCODE" ]; then
-        PASSCODE=`for i in {1..6}; do echo -n $((RANDOM % 10)); done`
+        PASSCODE=`for i in {1..8}; do echo -n $((RANDOM % 10)); done`
     fi
 
     # install pkg
@@ -355,7 +380,7 @@ update_usage() {
     cur_io=$(expr $tcp_in + $udp_in + $tcp_out + $udp_out)
 
     pdir=`dirname "$0"`
-    # 0 timestamp | 1 tcpin| 2 udpin| 3 tcpout| 4 udpout| 5 inout| 6 diff| 7 usage
+    # 0 timestamp | 1 tcpin| 2 udpin| 3 tcpout| 4 udpout| 5 inout| 6 diff| 7 usage | 8 usage(MB)
     prevline=$(tail -n 1 $pdir/log/$PORT.log)
     IFS=' '
     read -ra arr <<< "$prevline"
@@ -379,7 +404,7 @@ update_usage() {
     usage_mb=$((usage / 1024 / 1024))
 
     # write log
-    echo "$(date '+%Y%m%dT%H:%M:%S') $tcp_in $udp_in $tcp_out $udp_out $cur_io $diff $usage">> $pdir/log/$PORT.log
+    echo "$(date '+%Y%m%dT%H:%M:%S') $tcp_in $udp_in $tcp_out $udp_out $cur_io $diff $usage $usage_mb"MB>> $pdir/log/$PORT.log
 
     if [ $usage -lt $((1024 * 1024 * total)) ]; then
         # create next update schedule

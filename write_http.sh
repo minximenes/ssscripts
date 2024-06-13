@@ -8,8 +8,8 @@ Description=flask http
 After=network.target
 
 [Service]
-User=ubuntu
-Group=ubuntu
+User=$(whoami)
+Group=$(groups)
 WorkingDirectory=$PDIR
 Environment="PYTHONPATH=$PDIR"
 ExecStart=gunicorn -b 0.0.0.0:5000 --workers 4 httpservice:app
