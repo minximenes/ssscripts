@@ -81,7 +81,6 @@ start_http() {
     # install py3
     sudo apt-get install python3 python3-pip
     # install flask and gunicorn by py
-    sudo pip3 install Flask
     sudo pip3 install Flask gunicorn
 
     # call bash to write http conf file

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # receive paras
-PORT=$([ -n "$1" ] && echo $1 || echo 3389)
-PWD=$([ -n "$2" ] && echo "$2" || echo "c4dF6h9-")
+PORT=$([ -n "$1" ] && echo $1 || echo 8388)
+PWD=$([ -n "$2" ] && echo "$2" || echo "12qwaszx")
 
 # install
 if dpkg -s shadowsocks-libev | grep "installed" >/dev/null 2>&1; then
