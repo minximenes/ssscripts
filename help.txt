@@ -9,6 +9,6 @@ start [port]
 restart [port]
     -p passcode
 stop [port]
-status [port]
+status [*port]
     port is optional, show all in-use port's info if not given
 usage [port]
