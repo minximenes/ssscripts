@@ -3,6 +3,7 @@
 # receive paras
 PORT=$([ -n "$1" ] && echo $1 || echo 8388)
 PWD=$([ -n "$2" ] && echo "$2" || echo "12qwaszx")
+AEAD=$([ -n "$3" ] && echo "$3" || echo "chacha20-ietf-poly1305")
 
 # install
 if dpkg -s shadowsocks-libev | grep "installed" >/dev/null 2>&1; then
@@ -22,7 +23,7 @@ cat << EOF > $PORT.tmp
     "server_port":$PORT,
     "password":"$PWD",
     "timeout":86400,
-    "method":"chacha20-ietf-poly1305",
+    "method":"$AEAD",
     "fast_open":false
 }
 EOF
@@ -32,4 +33,4 @@ sudo systemctl enable shadowsocks-libev
 sudo systemctl restart shadowsocks-libev
 sudo systemctl status shadowsocks-libev
 
-echo "Please login with port $PORT and passcode $PWD and AEAD chacha20-ietf-poly1305"
+echo "Please login with port $PORT and passcode $PWD and AEAD $AEAD"
