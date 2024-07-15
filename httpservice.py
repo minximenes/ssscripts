@@ -9,7 +9,7 @@ def index():
 
 @app.errorhandler(Exception)
 def handle_error(error):
-    return jsonify({"error": str(error) }), 500
+    return jsonify({"error": str(error)}), 500
 
 @app.route('/log/<id>')
 def get_logs(id):
